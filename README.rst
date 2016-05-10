@@ -27,7 +27,7 @@ Run a command like this:
 To submit the demo directory:
    ``submitIpfs demoSubmit/ALL-US.json --email max@soe.ucsc.edu --institution 'UC Santa Cruz' -name 'Maximilian Haeussler'``
 
-The output looks like this:
+The output looks like this::
     ...
     file hash: QmaV9Lme9VjjbYxaaACR7BNK5Xiae8otrRTu9Fhn3PJ7ZX
     Submission info JSON written to demoSubmit/ALL-US.json.submitted
