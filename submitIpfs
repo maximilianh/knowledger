@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+
+import logging, sys, optparse, types, subprocess, json
+from collections import defaultdict
+from os.path import join, basename, dirname, isfile
+
+# === command line interface, options and help ===
+parser = optparse.OptionParser("usage: %prog [options] JSONFile - write a directory of VCFs and JSON metadata to IPFS.")
+
+parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages")
+parser.add_option("-e", "--email", dest="email", action="store", help="email address of submitter")
+parser.add_option("-n", "--name", dest="name", action="store", help="real name of submitter")
+parser.add_option("-i", "--institution", dest="institution", action="store", help="institution of submitter")
+#parser.add_option("-f", "--file", dest="file", action="store", help="run on file") 
+#parser.add_option("", "--test", dest="test", action="store_true", help="do something") 
+(options, args) = parser.parse_args()
+
+if options.debug:
+    logging.basicConfig(level=logging.DEBUG)
+else:
+    logging.basicConfig(level=logging.INFO)
+
+# ==== functions =====
+
+def runCommand(cmd, ignoreErrors=False, verbose=False):
+    """ run command in shell, exit if not successful """
+    #if type(cmd)==types.ListType:
+        #cmd = " ".join(cmd)
+    msg = "Running shell command: %s" % cmd
+    logging.debug(msg)
+    if verbose:
+        logging.info(msg)
+
+    assert(type(cmd)==types.ListType)
+    ret = subprocess.call(cmd)
+    cmd = " ".join(cmd) # for debug output
+
+    if ret!=0:
+        if ignoreErrors:
+            logging.info("Could not run command %s, retcode %s" % (cmd, str(ret)))
+            return None
+        else:
+            raise Exception("Could not run command (Exitcode %d): %s" % (ret, cmd))
+    return ret
+
+def execOutput(cmd):
+    " run command and return output "
+    output = subprocess.check_output(cmd)
+    return output
+
+def ipfsAdd(path):
+    " add file to ipfs and return hash "
+    if not isfile(path):
+        print "Error: %s does not exist" % path
+        sys.exit(1)
+    print "Adding %s to ipfs" % path
+    cmd = ["ipfs", "add", "-q", path]
+    ipfsHash = execOutput(cmd).strip()
+    return ipfsHash
+
+# ----------- main --------------
+def main():
+    if len(args)==0:
+        parser.print_help()
+        sys.exit(0)
+
+    jsonFname = args[0]
+    sampleMeta = json.load(open(jsonFname))
+
+    if not options.name or not options.email or not options.institution:
+        print "Please provide a value for the --email, --name and --institution options. -h for help."
+        sys.exit(1)
+
+    # go over meta data. Along the way, add files to ipfs and hashes to a new dict
+    sampleMetaSub = {}
+    for sampleId, sampleData in sampleMeta.iteritems():
+        newSample = {}
+        for key, val in sampleData.iteritems():
+            if val=="":
+                continue
+            if key.endswith("_filename"):
+                fname = join(dirname(jsonFname), sampleData[key])
+                fileHash = ipfsAdd(fname)
+                print "file hash: %s" % fileHash
+                newSample[key.replace("_filename", "_ipfs_hash")] = fileHash
+            newSample[key] = val
+
+        sampleMetaSub[sampleId] = newSample
+
+    submitMeta = {}
+    submitMeta["submission_filename"] = basename(jsonFname)
+    submitMeta["submitter_email"] = options.email
+    submitMeta["submitter_institution"] = options.institution
+    submitMeta["submitter_name"] = options.name
+    submitMeta["sampleData"] = sampleMetaSub
+
+    subJsonFname = jsonFname+".submitted"
+    json.dump(submitMeta, open(subJsonFname, "w"), sort_keys=True, indent=4, separators=(',', ': '))
+    print "Submission info JSON written to %s" % subJsonFname
+    jsonHash = ipfsAdd(subJsonFname)
+
+    subIdFname = jsonFname+".submissionId"
+    open(subIdFname, "w").write(jsonHash)
+    print "Submission ID written to %s" % subIdFname
+
+    print "IPFS submission OK. Submission ID is %s" % jsonHash
+
+main()
