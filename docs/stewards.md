@@ -5,7 +5,7 @@ Installation
 ------------
 
 1. Install IPFS from http://ipfs.io, like this:
-   ```wget http://dist.ipfs.io/go-ipfs/v0.4.0/go-ipfs_v0.4.0_linux-amd64.tar.gz -O - | tar xvz; sudo mv go-ipfs/ipfs /usr/local/bin/; sudo chmod a+x /usr/bin/local/ipfs```
+   ```wget http://dist.ipfs.io/go-ipfs/v0.4.0/go-ipfs_v0.4.0_linux-amd64.tar.gz -O - | tar xvz; sudo mv go-ipfs/ipfs /usr/local/bin/; sudo chmod a+x /usr/local/bin/ipfs```
 2. Run "ipfs init"
 3. Git clone this repo. You need Python installed on your machine, which is usually the case, except on Windows.
 
