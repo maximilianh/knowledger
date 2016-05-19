@@ -2,25 +2,33 @@
 
 import logging, sys, optparse, types, subprocess, json
 from collections import defaultdict
-from os.path import join, basename, dirname, isfile
+from os.path import join, basename, dirname, isfile, abspath
 
 # === command line interface, options and help ===
-parser = optparse.OptionParser("""usage: %prog [options] command options - decentral data coordination center, the command line interface for the cancer knowledger
+parser = optparse.OptionParser("""usage: %prog [options] command arguments - decentral data coordination center, the command line interface for the cancer knowledger
 
 commands:
-submit     - submit a JSON meta data file and attached VCF files via IPFS
-register   - register an IPFS submission on Ethereum
 
-startGeth  - connect to the private ethereum network of the knowledger
-list       - list all submitted datasets of all stewards
-steward    - run a steward node: mirror all submitted datasets locally
+submit     - submit a JSON meta data file and attached VCF files via IPFS
+startGeth  - connect to the private ethereum network, the knowledger block chain
+register   - register an IPFS submission on the block chain
+
+list       - list all submitted datasets of all stewards that are in the block chain
+steward    - run a steward node: mirror all block-chain datasets locally with IPFS
+
+examples:
+
+%prog submit ALL/submission.json - submit submission.json and all files it references to IPFS
+%prog startGeth                  - connnect to the ethereum block chain
+%prog register QmemBUVjsYonnibtq6Jxi8yuyxmyhEuRAZQaLbZfkv1K9X  - register the submission in the block chain
+%prog list                       - check if the submission has been accepted by the block chain
 
 """)
 
 parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages")
-parser.add_option("-e", "--email", dest="email", action="store", help="email address of submitter")
-parser.add_option("-n", "--name", dest="name", action="store", help="real name of submitter")
-parser.add_option("-i", "--institution", dest="institution", action="store", help="institution of submitter")
+#parser.add_option("-e", "--email", dest="email", action="store", help="email address of submitter")
+#parser.add_option("-n", "--name", dest="name", action="store", help="real name of submitter")
+#parser.add_option("-i", "--institution", dest="institution", action="store", help="institution of submitter")
 #parser.add_option("-f", "--file", dest="file", action="store", help="run on file") 
 #parser.add_option("", "--test", dest="test", action="store_true", help="do something") 
 (options, args) = parser.parse_args()
@@ -34,14 +42,17 @@ else:
 
 # a lot of data is inlined, to keep the need for external files very low
 
+gethDataDir = "."
+gethIpcPath = "ipc:/"+abspath(join(gethDataDir, "geth.ipc"))
+
 contractAddress = "0xb315ab588d79fa70fd9c496c050c848c8482893b"
 
 sendVarJs = \
 """
-abi = [{"constant":false,"inputs":[{"name":"_varDesc","type":"bytes"}],"name":"saveVar","outputs":[],"type":"function"},{"anonymous":false,"inputs":[{"indexed":false,"name":"_from","type":"address"},{"indexed":false,"name":"hashId","type":"bytes"}],"name":"VarLog","type":"event"}];
+abi = [{"constant":false,"inputs":[{"name":"_varDesc","type":"bytes"}],"name":"addSubmission","outputs":[],"type":"function"},{"anonymous":false,"inputs":[{"indexed":false,"name":"_from","type":"address"},{"indexed":false,"name":"hashId","type":"bytes"}],"name":"VarLog","type":"event"}];
 var contract = web3.eth.contract(abi); 
 var publicVarStore = contract.at("""+contractAddress+""");
-publicVarStore.saveVar.sendTransaction("%s", {from:eth.accounts[0]});
+publicVarStore.addSubmission.sendTransaction("%s", {from:eth.accounts[0]});
 """
 
 # ==== functions =====
@@ -124,10 +135,47 @@ def submitToIpfs(jsonFname):
 
     print "IPFS submission OK. Submission ID is %s" % jsonHash
 
+def startGeth():
+    " start geth on the local machine, connect to the genome network and start mining"
+    cmd = ["geth", "--nodiscover", "--genesis", "/mnt/persistent/ethereum/genomeNet/customGenesis.json", "--datadir", gethDataDir, "--identity","ucscMainNode", "--networkid", "93324", "--autodag", "--nat",  "any", "--mine", "1"]
+    runCommand(cmd)
+
 def registerSubmission(ipfsHash):
-    " use geth to send an ethereum transaction with the hashId "
+    " connect to running geth and send an ethereum transaction with the hashId. Return transaction ID. "
+    jsCmd = sendVarJs % varDesc
+    cmd = ["geth","--datadir",gethDataDir,"--exec", jsCmd, "attach", gethIpcPath]
+    ret = subprocess.check_output(cmd)
+    tid = ret.replace('"','')
+    print "Transaction ID: %s" % tid
+    return tid
 
+def iterLog():
+    "yield (addr, hash) tuples received from block chain"
+    jsCode = '''var filter = web3.eth.filter({'fromBlock' : 0, address : "%s"}); var f = filter.watch(function (error, log) { var v = console.log(log.data); });''' % contractAddress
+    cmd = ["geth", "--exec",  jsCode, "attach", gethIpcPath]
+    pipe = Popen(cmd, stdout=PIPE)
+    for l in pipe.stdout:
+        if len(l)<=10:
+            continue
+        if "unable" in l:
+            continue
+        l = l.strip().strip("0x")
+        fromAddr = l[:40].lstrip("00")
+        fileHash = l[137:].strip("00")
+        hashStr = fileHash.decode("hex")
+        yield fromAddr, hashStr[1:]
 
+def listSubmissions():
+    " list all submissions ever sent to the contract on the ethereum network "
+    print "from	ipfsHash"
+    for fromAddr, ipfsHash in iterLog():
+        print fromAddr, ipfsHash
+
+def runSteward():
+    " "
+    for fromAddr, ipfsHash in iterLog():
+        cmd = ["ipfs", "pin", ipfsHash]
+        runCommand(cmd)
 # ----------- main --------------
 def main():
     if len(args)==0:
@@ -139,9 +187,15 @@ def main():
     if command=="submit":
         jsonFname = args[1]
         submitToIpfs(jsonFname)
+    elif command=="startGeth":
+        startGeth()
     elif command=="register":
         ipfsHash = args[1]
         registerSubmission(ipfsHash)
+    elif command=="list":
+        listSubmissions()
+    elif command=="steward":
+        runSteward()
 
 
 main()
