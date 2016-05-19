@@ -5,7 +5,17 @@ from collections import defaultdict
 from os.path import join, basename, dirname, isfile
 
 # === command line interface, options and help ===
-parser = optparse.OptionParser("usage: %prog [options] JSONFile - write a directory of VCFs and JSON metadata to IPFS.")
+parser = optparse.OptionParser("""usage: %prog [options] command options - decentral data coordination center, the command line interface for the cancer knowledger
+
+commands:
+submit     - submit a JSON meta data file and attached VCF files via IPFS
+register   - register an IPFS submission on Ethereum
+
+startGeth  - connect to the private ethereum network of the knowledger
+list       - list all submitted datasets of all stewards
+steward    - run a steward node: mirror all submitted datasets locally
+
+""")
 
 parser.add_option("-d", "--debug", dest="debug", action="store_true", help="show debug messages")
 parser.add_option("-e", "--email", dest="email", action="store", help="email address of submitter")
@@ -19,6 +29,20 @@ if options.debug:
     logging.basicConfig(level=logging.DEBUG)
 else:
     logging.basicConfig(level=logging.INFO)
+
+# ==== globals   =====
+
+# a lot of data is inlined, to keep the need for external files very low
+
+contractAddress = "0xb315ab588d79fa70fd9c496c050c848c8482893b"
+
+sendVarJs = \
+"""
+abi = [{"constant":false,"inputs":[{"name":"_varDesc","type":"bytes"}],"name":"saveVar","outputs":[],"type":"function"},{"anonymous":false,"inputs":[{"indexed":false,"name":"_from","type":"address"},{"indexed":false,"name":"hashId","type":"bytes"}],"name":"VarLog","type":"event"}];
+var contract = web3.eth.contract(abi); 
+var publicVarStore = contract.at("""+contractAddress+""");
+publicVarStore.saveVar.sendTransaction("%s", {from:eth.accounts[0]});
+"""
 
 # ==== functions =====
 
@@ -58,13 +82,8 @@ def ipfsAdd(path):
     ipfsHash = execOutput(cmd).strip()
     return ipfsHash
 
-# ----------- main --------------
-def main():
-    if len(args)==0:
-        parser.print_help()
-        sys.exit(0)
-
-    jsonFname = args[0]
+def submitToIpfs(jsonFname):
+    """ submit a json file and all referenced files to IPFS """
     sampleMeta = json.load(open(jsonFname))
 
     if not options.name or not options.email or not options.institution:
@@ -87,15 +106,15 @@ def main():
 
         sampleMetaSub[sampleId] = newSample
 
-    submitMeta = {}
-    submitMeta["submission_filename"] = basename(jsonFname)
-    submitMeta["submitter_email"] = options.email
-    submitMeta["submitter_institution"] = options.institution
-    submitMeta["submitter_name"] = options.name
-    submitMeta["sampleData"] = sampleMetaSub
+    #submitMeta = {}
+    #submitMeta["submission_filename"] = basename(jsonFname)
+    #submitMeta["submitter_email"] = options.email
+    #submitMeta["submitter_institution"] = options.institution
+    #submitMeta["submitter_name"] = options.name
+    #submitMeta["sampleData"] = sampleMetaSub
 
     subJsonFname = jsonFname+".submitted"
-    json.dump(submitMeta, open(subJsonFname, "w"), sort_keys=True, indent=4, separators=(',', ': '))
+    json.dump(sampleMetaSub, open(subJsonFname, "w"), sort_keys=True, indent=4, separators=(',', ': '))
     print "Submission info JSON written to %s" % subJsonFname
     jsonHash = ipfsAdd(subJsonFname)
 
@@ -104,5 +123,25 @@ def main():
     print "Submission ID written to %s" % subIdFname
 
     print "IPFS submission OK. Submission ID is %s" % jsonHash
+
+def registerSubmission(ipfsHash):
+    " use geth to send an ethereum transaction with the hashId "
+
+
+# ----------- main --------------
+def main():
+    if len(args)==0:
+        parser.print_help()
+        sys.exit(0)
+
+    command = args[0]
+
+    if command=="submit":
+        jsonFname = args[1]
+        submitToIpfs(jsonFname)
+    elif command=="register":
+        ipfsHash = args[1]
+        registerSubmission(ipfsHash)
+
 
 main()
