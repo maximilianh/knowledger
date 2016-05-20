@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
-import logging, sys, optparse, types, subprocess, json
+import logging, sys, optparse, types, subprocess, json, os
+from time import sleep
 from collections import defaultdict
-from os.path import join, basename, dirname, isfile, abspath
+from os.path import join, basename, dirname, isfile, abspath, expanduser
 
 # === command line interface, options and help ===
 parser = optparse.OptionParser("""usage: %prog [options] command arguments - decentral data coordination center, the command line interface for the cancer knowledger
@@ -42,7 +43,7 @@ else:
 
 # a lot of data is inlined, to keep the need for external files very low
 
-gethDataDir = "."
+gethDataDir = os.environ.get("ddccDir", ".")
 gethIpcPath = "ipc:/"+abspath(join(gethDataDir, "geth.ipc"))
 
 contractAddress = "0xb315ab588d79fa70fd9c496c050c848c8482893b"
@@ -55,13 +56,29 @@ var publicVarStore = contract.at("""+contractAddress+""");
 publicVarStore.addSubmission.sendTransaction("%s", {from:eth.accounts[0]});
 """
 
+customGenesisStr = \
+"""
+{
+    "nonce": "0x0000000000000042",
+    "timestamp": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "extraData": "0x0",
+    "gasLimit": "0x10000000",
+    "difficulty": "0x400",
+    "mixhash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x3333333333333333333333333333333333333333",
+    "alloc": {
+    "21318dd849af1fb858cd6068897f04e25e8b7f9d" :  { "balance": "10000000000000000000000000000" } 
+    }
+}
+"""
 # ==== functions =====
 
 def runCommand(cmd, ignoreErrors=False, verbose=False):
     """ run command in shell, exit if not successful """
     #if type(cmd)==types.ListType:
         #cmd = " ".join(cmd)
-    msg = "Running shell command: %s" % cmd
+    msg = "Running shell command: %s" % " ".join(cmd)
     logging.debug(msg)
     if verbose:
         logging.info(msg)
@@ -137,12 +154,32 @@ def submitToIpfs(jsonFname):
 
 def startGeth():
     " start geth on the local machine, connect to the genome network and start mining"
-    cmd = ["geth", "--nodiscover", "--genesis", "/mnt/persistent/ethereum/genomeNet/customGenesis.json", "--datadir", gethDataDir, "--identity","ucscMainNode", "--networkid", "93324", "--autodag", "--nat",  "any", "--mine", "1"]
+    cgFname = join(gethDataDir, "customGenesis.json")
+    if not isfile(cgFname):
+        cgfh = open(cgFname, "w").write(customGenesisStr)
+
+    # mine with a single thread
+    cmd = ["geth", "--genesis", cgFname, "--datadir", gethDataDir, \
+            "--identity","ddccNode", "--networkid", "93324", "--autodag", \
+            "--nat",  "any", "--mine", "1", "2>", gethDataDir+".log", "&"]
+
+    ret = os.system(" ".join(cmd))
+    if ret!=0:
+        print "Could not run command %s" % " ".join(cmd)
+        sys.exit(1)
+
+    print "Starting geth and mining..."
+    sleep(5)
+
+    pwd = open(expanduser("~/.ddccPwd")).read().strip()
+    cmd = ["geth", "--exec", """ "personal.unlockAccount(eth.accounts[0], '%s');" """ % pwd, "--datadir", gethDataDir, "attach", gethIpcPath]
     runCommand(cmd)
+
+    print "Unlocked geth account"
 
 def registerSubmission(ipfsHash):
     " connect to running geth and send an ethereum transaction with the hashId. Return transaction ID. "
-    jsCmd = sendVarJs % varDesc
+    jsCmd = sendVarJs % ipfsHash
     cmd = ["geth","--datadir",gethDataDir,"--exec", jsCmd, "attach", gethIpcPath]
     ret = subprocess.check_output(cmd)
     tid = ret.replace('"','')
