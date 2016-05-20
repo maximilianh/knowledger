@@ -4,6 +4,7 @@ import logging, sys, optparse, types, subprocess, json, os
 from time import sleep
 from collections import defaultdict
 from os.path import join, basename, dirname, isfile, abspath, expanduser, isdir
+from subprocess import Popen, PIPE
 
 # === command line interface, options and help ===
 parser = optparse.OptionParser("""usage: %prog [options] command arguments - decentral data coordination center, the command line interface for the cancer knowledger
@@ -80,7 +81,7 @@ def runCommand(cmd, ignoreErrors=False, verbose=False, shell=False):
     """ run command in shell, exit if not successful """
     #if type(cmd)==types.ListType:
         #cmd = " ".join(cmd)
-    msg = "Running shell command: %s" % " ".join(cmd)
+    msg = "Running command: %s" % " ".join(cmd)
     logging.debug(msg)
     if verbose:
         logging.info(msg)
@@ -165,13 +166,24 @@ def initGeth():
         cmd = ["geth", "--datadir", gethDataDir, "account", "new"]
         runCommand(cmd)
 
+def gethUnlockAccount():
+    logging.info("Reading password from ~/.ddccPwd")
+    pwd = open(expanduser("~/.ddccPwd")).read().strip()
+
+    runGethCmd("personal.unlockAccount(eth.accounts[0], '%s');" % pwd)
+    #cmd = ["geth", "--exec", """ "personal.unlockAccount(eth.accounts[0], '%s');" """ % pwd, "attach", gethIpcPath]
+    #runCommand(cmd)
+    logging.info( "Unlocked geth account" )
+
+
 def startNode():
-    " start geth on the local machine, connect to the genome network and start mining"
+    " start geth on the local machine, connect to the genome network, unlock account and start mining"
     cgFname = join(gethDataDir, "customGenesis.json")
     if not isfile(cgFname):
         cgfh = open(cgFname, "w").write(customGenesisStr)
 
     # mine with a single thread
+    logging.info( "Starting geth and mining...")
     cmd = ["geth", "--genesis", cgFname, "--datadir", gethDataDir, \
             "--identity","ddccNode", "--networkid", "93324", "--autodag", \
             "--nat",  "any", "--mine", "1", "2>", join(gethDataDir, "geth.log"), "&"]
@@ -181,18 +193,11 @@ def startNode():
         print "Could not run command %s" % " ".join(cmd)
         sys.exit(1)
 
-    print "Starting geth and mining..."
-    sleep(3) # need time for startup
+    sleep(2) # give some time for startup
 
-    logging.info("Reading password from ~/.ddccPwd")
-    pwd = open(expanduser("~/.ddccPwd")).read().strip()
+    gethUnlockAccount()
 
-    runGethCmd("personal.unlockAccount(eth.accounts[0], '%s');" % pwd)
-    #cmd = ["geth", "--exec", """ "personal.unlockAccount(eth.accounts[0], '%s');" """ % pwd, "attach", gethIpcPath]
-    #runCommand(cmd)
-    logging.info( "Unlocked geth account" )
-
-    cmd = ["ipfs", "--init", "daemon&"]
+    cmd = ["ipfs", "daemon", "--init", "&"]
     runCommand(cmd, shell=True) # spawn a process
     logging.info("Started IPFS daemon")
 
@@ -206,6 +211,8 @@ def runGethCmd(jsStr):
 
 def registerSubmission(ipfsHash):
     " connect to running geth and send an ethereum transaction with the hashId. Return transaction ID. "
+    gethUnlockAccount()
+
     jsCmd = sendVarJs % ipfsHash
     tid = runGethCmd(jsCmd)
     tid = tid.replace('"','')
@@ -215,6 +222,8 @@ def registerSubmission(ipfsHash):
 def iterLog():
     "yield (addr, hash) tuples received from block chain"
     jsCode = '''var filter = web3.eth.filter({'fromBlock' : 0, address : "%s"}); var f = filter.watch(function (error, log) { var v = console.log(log.data); });''' % contractAddress
+    cmd = ["geth", "--exec",  jsCode, "attach", gethIpcPath]
+    logging.debug("Running %s" % " ".join(cmd))
     pipe = Popen(cmd, stdout=PIPE)
     for l in pipe.stdout:
         if len(l)<=10:
