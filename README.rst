@@ -10,8 +10,7 @@ Installation
 ------------
 
 1. Install IPFS from http://ipfs.io
-2. Run "ipfs init"
-3. Git clone this repo. You need Python installed on your machine, which is usually the case, except on Windows.
+2. Git clone this repo (Python2.7 should be installed on most machines these days)
 
 Start a steward node
 --------------------
@@ -27,7 +26,7 @@ Write the password to a file and secure it:
 
 Now start the geth ethereum steward node:
 
-   ddcc startGeth
+   ddcc startNode
 
 Prepare the submission
 ---------------------

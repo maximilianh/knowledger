@@ -11,7 +11,7 @@ parser = optparse.OptionParser("""usage: %prog [options] command arguments - dec
 commands:
 
 submit     - submit a JSON meta data file and attached VCF files via IPFS
-startGeth  - connect to the private ethereum network, the knowledger block chain
+startNode  - connect to the private ethereum network, the knowledger block chain. Start IPFS.
 register   - register an IPFS submission on the block chain
 
 list       - list all submitted datasets of all stewards that are in the block chain
@@ -20,7 +20,7 @@ steward    - run a steward node: mirror all block-chain datasets locally with IP
 examples:
 
 %prog submit ALL/submission.json - submit submission.json and all files it references to IPFS
-%prog startGeth                  - connnect to the ethereum block chain
+%prog startNode                  - connnect to the ethereum block chain and IPFS
 %prog register QmemBUVjsYonnibtq6Jxi8yuyxmyhEuRAZQaLbZfkv1K9X  - register the submission in the block chain
 %prog list                       - check if the submission has been accepted by the block chain
 
@@ -76,7 +76,7 @@ customGenesisStr = \
 """
 # ==== functions =====
 
-def runCommand(cmd, ignoreErrors=False, verbose=False):
+def runCommand(cmd, ignoreErrors=False, verbose=False, shell=False):
     """ run command in shell, exit if not successful """
     #if type(cmd)==types.ListType:
         #cmd = " ".join(cmd)
@@ -86,7 +86,7 @@ def runCommand(cmd, ignoreErrors=False, verbose=False):
         logging.info(msg)
 
     assert(type(cmd)==types.ListType)
-    ret = subprocess.call(cmd)
+    ret = subprocess.call(cmd, shell=shell)
     cmd = " ".join(cmd) # for debug output
 
     if ret!=0:
@@ -116,9 +116,9 @@ def submitToIpfs(jsonFname):
     """ submit a json file and all referenced files to IPFS """
     sampleMeta = json.load(open(jsonFname))
 
-    if not options.name or not options.email or not options.institution:
-        print "Please provide a value for the --email, --name and --institution options. -h for help."
-        sys.exit(1)
+    #if not options.name or not options.email or not options.institution:
+        #print "Please provide a value for the --email, --name and --institution options. -h for help."
+        #sys.exit(1)
 
     # go over meta data. Along the way, add files to ipfs and hashes to a new dict
     sampleMetaSub = {}
@@ -165,7 +165,7 @@ def initGeth():
         cmd = ["geth", "--datadir", gethDataDir, "account", "new"]
         runCommand(cmd)
 
-def startGeth():
+def startNode():
     " start geth on the local machine, connect to the genome network and start mining"
     cgFname = join(gethDataDir, "customGenesis.json")
     if not isfile(cgFname):
@@ -186,9 +186,15 @@ def startGeth():
 
     logging.info("Reading password from ~/.ddccPwd")
     pwd = open(expanduser("~/.ddccPwd")).read().strip()
-    cmd = ["geth", "--exec", """ "personal.unlockAccount(eth.accounts[0], '%s');" """ % pwd, "attach", gethIpcPath]
-    runCommand(cmd)
-    print "Unlocked geth account"
+
+    runGethCmd("personal.unlockAccount(eth.accounts[0], '%s');" % pwd)
+    #cmd = ["geth", "--exec", """ "personal.unlockAccount(eth.accounts[0], '%s');" """ % pwd, "attach", gethIpcPath]
+    #runCommand(cmd)
+    logging.info( "Unlocked geth account" )
+
+    cmd = ["ipfs", "--init", "daemon&"]
+    runCommand(cmd, shell=True) # spawn a process
+    logging.info("Started IPFS daemon")
 
 def runGethCmd(jsStr):
     " execute a js script through geth attach and return result "
@@ -245,8 +251,8 @@ def main():
         submitToIpfs(jsonFname)
     elif command=="initGeth":
         initGeth()
-    elif command=="startGeth":
-        startGeth()
+    elif command=="startNode":
+        startNode()
     elif command=="register":
         ipfsHash = args[1]
         registerSubmission(ipfsHash)
