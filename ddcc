@@ -3,7 +3,7 @@
 import logging, sys, optparse, types, subprocess, json, os
 from time import sleep
 from collections import defaultdict
-from os.path import join, basename, dirname, isfile, abspath, expanduser
+from os.path import join, basename, dirname, isfile, abspath, expanduser, isdir
 
 # === command line interface, options and help ===
 parser = optparse.OptionParser("""usage: %prog [options] command arguments - decentral data coordination center, the command line interface for the cancer knowledger
@@ -44,6 +44,8 @@ else:
 # a lot of data is inlined, to keep the need for external files very low
 
 gethDataDir = os.environ.get("ddccDir", ".")
+logging.debug("geth data dir: %s" % gethDataDir)
+
 gethIpcPath = "ipc:/"+abspath(join(gethDataDir, "geth.ipc"))
 
 contractAddress = "0xb315ab588d79fa70fd9c496c050c848c8482893b"
@@ -52,7 +54,7 @@ sendVarJs = \
 """
 abi = [{"constant":false,"inputs":[{"name":"_varDesc","type":"bytes"}],"name":"addSubmission","outputs":[],"type":"function"},{"anonymous":false,"inputs":[{"indexed":false,"name":"_from","type":"address"},{"indexed":false,"name":"hashId","type":"bytes"}],"name":"VarLog","type":"event"}];
 var contract = web3.eth.contract(abi); 
-var publicVarStore = contract.at("""+contractAddress+""");
+var publicVarStore = contract.at('"""+contractAddress+"""');
 publicVarStore.addSubmission.sendTransaction("%s", {from:eth.accounts[0]});
 """
 
@@ -152,6 +154,17 @@ def submitToIpfs(jsonFname):
 
     print "IPFS submission OK. Submission ID is %s" % jsonHash
 
+def initGeth():
+    " start geth on the local machine, connect to the genome network and start mining"
+    if not isdir(gethDataDir):
+        os.makedirs(gethDataDir)
+        logging.info("Created directory %s" % gethDataDir)
+
+    if not isdir(join(gethDataDir, "chainData")):
+        logging.info("Initializing a geth account")
+        cmd = ["geth", "--datadir", gethDataDir, "account", "new"]
+        runCommand(cmd)
+
 def startGeth():
     " start geth on the local machine, connect to the genome network and start mining"
     cgFname = join(gethDataDir, "customGenesis.json")
@@ -161,7 +174,7 @@ def startGeth():
     # mine with a single thread
     cmd = ["geth", "--genesis", cgFname, "--datadir", gethDataDir, \
             "--identity","ddccNode", "--networkid", "93324", "--autodag", \
-            "--nat",  "any", "--mine", "1", "2>", gethDataDir+".log", "&"]
+            "--nat",  "any", "--mine", "1", "2>", join(gethDataDir, "geth.log"), "&"]
 
     ret = os.system(" ".join(cmd))
     if ret!=0:
@@ -169,27 +182,33 @@ def startGeth():
         sys.exit(1)
 
     print "Starting geth and mining..."
-    sleep(5)
+    sleep(3) # need time for startup
 
+    logging.info("Reading password from ~/.ddccPwd")
     pwd = open(expanduser("~/.ddccPwd")).read().strip()
-    cmd = ["geth", "--exec", """ "personal.unlockAccount(eth.accounts[0], '%s');" """ % pwd, "--datadir", gethDataDir, "attach", gethIpcPath]
+    cmd = ["geth", "--exec", """ "personal.unlockAccount(eth.accounts[0], '%s');" """ % pwd, "attach", gethIpcPath]
     runCommand(cmd)
-
     print "Unlocked geth account"
+
+def runGethCmd(jsStr):
+    " execute a js script through geth attach and return result "
+    cmd = ["geth", "--exec", jsStr, "attach", gethIpcPath]
+    logging.debug("running command: %s" % " ".join(cmd))
+    ret = subprocess.check_output(cmd)
+    logging.debug("command output: %s" % ret)
+    return ret
 
 def registerSubmission(ipfsHash):
     " connect to running geth and send an ethereum transaction with the hashId. Return transaction ID. "
     jsCmd = sendVarJs % ipfsHash
-    cmd = ["geth","--datadir",gethDataDir,"--exec", jsCmd, "attach", gethIpcPath]
-    ret = subprocess.check_output(cmd)
-    tid = ret.replace('"','')
+    tid = runGethCmd(jsCmd)
+    tid = tid.replace('"','')
     print "Transaction ID: %s" % tid
     return tid
 
 def iterLog():
     "yield (addr, hash) tuples received from block chain"
     jsCode = '''var filter = web3.eth.filter({'fromBlock' : 0, address : "%s"}); var f = filter.watch(function (error, log) { var v = console.log(log.data); });''' % contractAddress
-    cmd = ["geth", "--exec",  jsCode, "attach", gethIpcPath]
     pipe = Popen(cmd, stdout=PIPE)
     for l in pipe.stdout:
         if len(l)<=10:
@@ -224,6 +243,8 @@ def main():
     if command=="submit":
         jsonFname = args[1]
         submitToIpfs(jsonFname)
+    elif command=="initGeth":
+        initGeth()
     elif command=="startGeth":
         startGeth()
     elif command=="register":
