@@ -3,8 +3,9 @@ Cancer Gene Trust
 
 Documentation for this project can be found on [Read the Docs](http://knowledger.readthedocs.org/en/latest/).
 
-The distribute data coordination center (ddcc) tool
-===================================================
+The distributed data coordination center (ddcc) tool to connect to the Cancer Gene Trust is documented below.
+
+Please be aware that this is a software experiment and still changing a lot.
 
 Installation
 ------------
