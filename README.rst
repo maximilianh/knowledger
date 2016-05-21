@@ -34,7 +34,7 @@ Prepare the submission
 
 1. Create a file with metadata that describes your VCF files. You can create a minimal one for a single VCF like this:
 
-   ``echo '{"sample1" : {"vcf_filename" : "test1.vcf.gz"}}' >> mySubmission.json``
+    echo '{"sample1" : {"vcf_filename" : "test1.vcf.gz"}}' >> mySubmission.json
 
    You can find a demo submission directory in ALL/.
 
